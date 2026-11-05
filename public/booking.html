@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clearview Autoglas — Book your car glass repair</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+  <style>
+    :root { --brand: #d71920; }
+    .brand-bg { background: var(--brand); color: #fff; }
+    .brand-text { color: var(--brand); }
+    .btn-brand { background: var(--brand); border-color: var(--brand); color: #fff; }
+    .btn-brand:hover { filter: brightness(.92); }
+    .pick { transition: border-color .15s, box-shadow .15s; cursor: pointer; }
+    .pick:hover { border-color: var(--brand); }
+    .pick.sel { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand) inset; }
+    .plate { background: #fff; border: 2px solid #111; border-radius: 6px; font: 700 1.6rem/1 ui-monospace, monospace; letter-spacing: .1em; text-align: center; }
+    #log { max-height: 30rem; overflow: auto; }
+    .log-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body class="bg-base-200 text-base-content">
+  <header class="brand-bg">
+    <div class="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
+      <div class="text-2xl font-black tracking-tight">Clearview <span class="font-light">Autoglas</span></div>
+      <span class="badge badge-outline border-white/60 text-white">UCP demo · fictional · no real payments</span>
+    </div>
+  </header>
+
+  <section class="brand-bg pb-10">
+    <div class="mx-auto max-w-6xl px-5">
+      <h1 class="text-3xl font-black sm:text-5xl">Cracked windscreen?<br>Book your repair in 2 minutes.</h1>
+      <p class="mt-3 max-w-xl opacity-90">Pick a service, enter your plate, choose a branch (or we come to you), and secure your slot with a small deposit.</p>
+    </div>
+  </section>
+
+  <main class="mx-auto grid max-w-6xl gap-6 px-5 py-8 lg:grid-cols-[1fr_22rem]">
+    <section class="min-w-0">
+      <ul id="steps" class="steps mb-6 w-full text-xs"></ul>
+      <div id="panel" class="rounded-box bg-base-100 p-6 shadow"></div>
+      <div id="nav" class="mt-4 flex justify-between"></div>
+    </section>
+
+    <aside class="min-w-0 space-y-4">
+      <div class="rounded-box bg-base-100 p-5 shadow">
+        <h2 class="font-bold">Your booking</h2>
+        <div id="summary" class="mt-3 text-sm"></div>
+      </div>
+      <div class="rounded-box bg-neutral p-4 text-neutral-content">
+        <div class="flex items-center justify-between"><h2 class="font-bold">Protocol log</h2><button id="clear-log" class="btn btn-ghost btn-xs">clear</button></div>
+        <p class="mt-1 text-xs opacity-60">Every action is a UCP-style API call. Click to expand.</p>
+        <div id="log" class="mt-3 space-y-2 text-xs"></div>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    const money = (c) => `€${(c / 100).toFixed(2).replace(".", ",")}`;
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const STEPS = ["Service", "Vehicle", "Location", "Date & time", "Confirm"];
+    let step = 0, session = null, services = [], locations = [], days = [], done = null, busy = false;
+
+    async function api(method, url, body) {
+      const res = await fetch(url, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+      const data = await res.json();
+      const el = document.createElement("details");
+      el.className = "rounded bg-black/30 p-2";
+      el.innerHTML = `<summary class="cursor-pointer font-mono"><span class="text-warning">${method}</span> ${esc(url)} <span class="${res.status < 400 ? "text-success" : "text-error"}">${res.status}</span></summary>` +
+        (body ? `<p class="mt-2 opacity-60">request</p><pre class="log-body">${esc(JSON.stringify(body, null, 2))}</pre>` : "") +
+        `<p class="mt-2 opacity-60">response</p><pre class="log-body">${esc(JSON.stringify(data, null, 2))}</pre>`;
+      $("log").prepend(el);
+      return { ok: res.ok, status: res.status, data };
+    }
+
+    async function update(patch) {
+      if (!session) session = (await api("POST", "/api/booking-sessions", patch)).data;
+      else {
+        const r = await api("PUT", `/api/booking-sessions/${session.id}`, patch);
+        if (r.ok) session = r.data;
+      }
+      renderSummary();
+    }
+
+    const total = (t) => session?.totals.find((x) => x.type === t)?.amount ?? 0;
+    const msgs = (...codes) => (session?.messages || []).filter((m) => codes.includes(m.code));
+    const errorBox = (...codes) => msgs(...codes).filter((m) => m.type === "error").map((m) => `<div class="alert alert-error mt-3 py-2 text-sm">${esc(m.content)}</div>`).join("");
+
+    function renderSteps() {
+      $("steps").innerHTML = STEPS.map((s, i) => `<li class="step ${i <= step ? "step-error" : ""}">${s}</li>`).join("");
+    }
+
+    function renderSummary() {
+      if (done) { $("summary").innerHTML = `<p class="opacity-60">Booking confirmed.</p>`; return; }
+      if (!session) { $("summary").innerHTML = `<p class="opacity-60">Nothing selected yet.</p>`; return; }
+      const row = (k, v) => v ? `<div class="flex justify-between gap-3 py-1"><dt class="opacity-60">${k}</dt><dd class="text-right font-medium">${esc(v)}</dd></div>` : "";
+      $("summary").innerHTML = `<dl>${row("Service", session.service?.title)}${row("Plate", session.vehicle?.plate)}${row("Location", session.location?.title)}${row("When", session.slot && `${session.slot.date} ${session.slot.time}`)}</dl>
+        ${session.service ? `<div class="mt-3 border-t border-base-content/10 pt-3"><div class="flex justify-between"><span>Total (incl. VAT)</span><b>${money(total("total"))}</b></div>
+        <div class="flex justify-between text-xs opacity-60"><span>Deposit now (20%)</span><span>${money(total("deposit_due_now"))}</span></div></div>` : ""}`;
+    }
+
+    function renderNav() {
+      if (done) { $("nav").innerHTML = ""; return; }
+      const ready = { 0: session?.service, 1: session?.vehicle?.plate && !msgs("invalid_plate").length, 2: session?.location && !msgs("not_mobile").length, 3: session?.slot && !msgs("invalid_slot", "slot_taken").length }[step];
+      $("nav").innerHTML = `<button class="btn btn-ghost" id="back" ${step === 0 ? "disabled" : ""}>← Back</button>` +
+        (step < 4 ? `<button class="btn btn-brand" id="next" ${ready ? "" : "disabled"}>Continue →</button>` : "");
+    }
+
+    function renderPanel() {
+      renderSteps(); renderNav();
+      const p = $("panel");
+      if (done) {
+        p.innerHTML = `<div class="text-center"><div class="text-5xl">✅</div><h2 class="mt-2 text-2xl font-black">You're booked!</h2>
+          <p class="mt-1 opacity-70">Reference <b class="brand-text">${esc(done.reference)}</b> · plate ${esc(done.vehicle.plate)}</p></div>
+          <dl class="mx-auto mt-5 max-w-sm space-y-1 text-sm">
+            <div class="flex justify-between"><dt>Service</dt><dd>${esc(done.service.title)}</dd></div>
+            <div class="flex justify-between"><dt>Where</dt><dd class="text-right">${esc(done.location.title)}</dd></div>
+            <div class="flex justify-between"><dt>When</dt><dd>${esc(done.slot.date)} at ${esc(done.slot.time)}</dd></div>
+            <div class="flex justify-between"><dt>Deposit paid</dt><dd>${money(done.deposit_paid.amount)}</dd></div>
+            <div class="flex justify-between font-bold"><dt>Balance at appointment</dt><dd>${money(done.balance_due.amount)}</dd></div></dl>
+          <div class="mt-6 text-center"><button id="again" class="btn btn-brand">Book another job</button></div>`;
+        return;
+      }
+      if (step === 0) {
+        p.innerHTML = `<h2 class="text-xl font-bold">What needs fixing?</h2><div class="mt-4 grid gap-3 sm:grid-cols-2">${services.map((s) => `
+          <div class="pick rounded-box border border-base-content/15 p-4 ${session?.service?.id === s.id ? "sel" : ""}" data-service="${s.id}">
+            <div class="flex items-start justify-between gap-2"><b>${esc(s.title)}</b><span class="brand-text font-bold">${money(s.price.amount)}</span></div>
+            <p class="mt-1 text-sm opacity-70">${esc(s.description)}</p>
+            <p class="mt-2 text-xs opacity-50">≈ ${s.duration_min} min${s.mobile_possible ? " · mobile possible" : ""}</p></div>`).join("")}</div>`;
+      } else if (step === 1) {
+        const ins = session?.insurance || {};
+        p.innerHTML = `<h2 class="text-xl font-bold">Your vehicle</h2>
+          <label class="mt-4 block text-sm font-medium">Licence plate</label>
+          <input id="plate" class="plate mt-1 w-56 p-2" placeholder="1-ABC-123" maxlength="12" value="${esc(session?.vehicle?.plate)}">
+          <div id="plate-error">${errorBox("invalid_plate")}</div>
+          <label class="label mt-6 cursor-pointer justify-start gap-3"><input id="claim" type="checkbox" class="checkbox" ${ins.claim ? "checked" : ""}> <span>I want to claim this through my insurance</span></label>
+          <input id="insurer" class="input input-bordered input-sm mt-2 w-full max-w-sm ${ins.claim ? "" : "hidden"}" placeholder="Insurance company" value="${esc(ins.company)}">`;
+      } else if (step === 2) {
+        p.innerHTML = `<h2 class="text-xl font-bold">Where should we do it?</h2><div class="mt-4 grid gap-3 sm:grid-cols-2">${locations.map((l) => `
+          <div class="pick rounded-box border border-base-content/15 p-4 ${session?.location?.id === l.id ? "sel" : ""}" data-location="${l.id}"><b>${esc(l.title)}</b><p class="mt-1 text-sm opacity-70">${esc(l.address)}</p></div>`).join("")}</div>${errorBox("not_mobile")}`;
+      } else if (step === 3) {
+        p.innerHTML = `<h2 class="text-xl font-bold">Pick a date and time</h2><div class="mt-4 space-y-3">${days.map((d) => `
+          <div class="flex flex-wrap items-center gap-2"><span class="w-28 text-sm font-medium">${new Date(d.date + "T12:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}</span>
+          ${d.times.map((t) => `<button class="btn btn-sm ${session?.slot?.date === d.date && session?.slot?.time === t.time ? "btn-brand" : "btn-outline"}" data-date="${d.date}" data-time="${t.time}" ${t.available ? "" : "disabled"}>${t.time}</button>`).join("")}</div>`).join("")}</div>${errorBox("invalid_slot", "slot_taken")}`;
+      } else {
+        const c = session?.contact || {};
+        p.innerHTML = `<h2 class="text-xl font-bold">Confirm &amp; pay deposit</h2>
+          <form id="confirm" class="mt-4 grid gap-3 sm:grid-cols-2">
+            <input name="name" class="input input-bordered" placeholder="Full name" value="${esc(c.name)}" required>
+            <input name="phone" class="input input-bordered" placeholder="Phone" value="${esc(c.phone)}" required>
+            <input name="email" type="email" class="input input-bordered sm:col-span-2" placeholder="Email" value="${esc(c.email)}" required>
+            <select name="token" class="select select-bordered sm:col-span-2"><option value="tok_success">Mock Pay: approve deposit</option><option value="tok_declined">Mock Pay: decline deposit</option></select>
+            <button class="btn btn-brand sm:col-span-2" ${busy ? "disabled" : ""}>Pay ${money(total("deposit_due_now"))} deposit &amp; book</button>
+          </form>${errorBox("invalid_email", "slot_taken", "not_mobile", "invalid_plate")}<p id="pay-error" class="mt-2 text-sm text-error"></p>
+          <p class="mt-3 text-xs opacity-60">Remaining ${money(total("balance_at_appointment"))} is paid at the appointment.</p>`;
+      }
+    }
+
+    async function loadDays() {
+      days = (await api("GET", `/api/availability?location=${session.location.id}`)).data.days;
+    }
+
+    document.addEventListener("click", async (e) => {
+      const t = e.target.closest("[data-service],[data-location],[data-date],button");
+      if (!t) return;
+      if (t.dataset.service) await update({ service_id: t.dataset.service });
+      else if (t.dataset.location) await update({ location_id: t.dataset.location });
+      else if (t.dataset.date) await update({ slot: { date: t.dataset.date, time: t.dataset.time } });
+      else if (t.id === "next") { step++; if (step === 3) await loadDays(); }
+      else if (t.id === "back") { step--; if (step === 3) await loadDays(); }
+      else if (t.id === "again") { done = null; session = null; step = 0; renderSummary(); }
+      else return;
+      renderPanel();
+    });
+
+    document.addEventListener("input", (e) => {
+      if (e.target.id !== "plate") return;
+      clearTimeout(window.plateTimer);
+      window.plateTimer = setTimeout(async () => {
+        await update({ vehicle: { plate: e.target.value } });
+        renderNav();
+        $("plate-error").innerHTML = errorBox("invalid_plate");
+      }, 350);
+    });
+
+    document.addEventListener("change", async (e) => {
+      if (e.target.id !== "claim" && e.target.id !== "insurer") return;
+      const claim = $("claim").checked;
+      $("insurer").classList.toggle("hidden", !claim);
+      await update({ insurance: { claim, company: $("insurer").value } });
+    });
+
+    document.addEventListener("submit", async (e) => {
+      if (e.target.id !== "confirm") return;
+      e.preventDefault();
+      const d = Object.fromEntries(new FormData(e.target));
+      busy = true;
+      await update({ contact: { name: d.name, phone: d.phone, email: d.email } });
+      if (session.status === "ready_for_complete") {
+        const r = await api("POST", `/api/booking-sessions/${session.id}/complete`, { payment: { handler_id: "mock_pay", token: d.token } });
+        busy = false;
+        if (r.ok) { done = r.data.booking; renderSummary(); renderPanel(); return; }
+        renderPanel(); $("pay-error").textContent = r.data.error.message; return;
+      }
+      busy = false; renderPanel();
+    });
+
+    $("clear-log").addEventListener("click", () => ($("log").innerHTML = ""));
+    (async () => {
+      await api("GET", "/.well-known/ucp");
+      services = (await api("GET", "/api/services")).data.services;
+      locations = (await api("GET", "/api/locations")).data.locations;
+      renderSummary(); renderPanel();
+    })();
+  </script>
+</body>
+</html>

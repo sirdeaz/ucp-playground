@@ -2,9 +2,9 @@
 
 Learning demos for the [Universal Commerce Protocol](https://ucp.dev/). Everything is fictional: no real payments, no real data, and the API is a simplified UCP-style subset, not a spec-complete implementation.
 
-## 1. Working demo: book store (`server.js`)
+## 1. Working demo: car glass booking (`server.js`)
 
-A zero-dependency Node (18+) merchant, **Page & Co. Books**, with a storefront and a live protocol log.
+A zero-dependency Node (18+) merchant, **Clearview Autoglas** (an original, fictional brand), with a multi-step booking site and a live protocol log. Book a windscreen or window job: service, Belgian licence plate, branch or mobile service, date/time slot, contact details, and a 20% deposit through a mock payment handler.
 
 ```
 node server.js          # then open http://localhost:3000
@@ -12,31 +12,31 @@ node server.js          # then open http://localhost:3000
 
 Use `PORT=8080 node server.js` to change the port.
 
-In the browser: search, add books to the cart, enter buyer and shipping details, choose a shipping method and pay with the mock handler (approve or decline). The side panel logs every API call.
-
 ### API
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/.well-known/ucp` | Discovery profile: capabilities, payment handlers |
-| GET | `/api/catalog?q=` | Search books |
-| POST | `/api/checkout-sessions` | Create a checkout session (cart) |
-| PUT | `/api/checkout-sessions/:id` | Update items, buyer, shipping |
-| POST | `/api/checkout-sessions/:id/complete` | Pay with `{"payment":{"handler_id":"mock_pay","token":"tok_success"}}` (`tok_declined` simulates a decline) |
-| POST | `/api/checkout-sessions/:id/cancel` | Cancel |
-| GET | `/api/orders/:id` | Order status |
+| GET | `/api/services` | Services and VAT-inclusive prices |
+| GET | `/api/locations` | Branches plus mobile service |
+| GET | `/api/availability?location=bxl` | Bookable days and time slots |
+| POST | `/api/booking-sessions` | Create a booking session |
+| PUT | `/api/booking-sessions/:id` | Update service, location, vehicle, slot, contact, insurance |
+| POST | `/api/booking-sessions/:id/complete` | Pay the deposit with `{"payment":{"handler_id":"mock_pay","token":"tok_success"}}` (`tok_declined` simulates a decline) |
+| POST | `/api/booking-sessions/:id/cancel` | Cancel the session |
+| GET / DELETE | `/api/bookings/:id` | Read or cancel a confirmed booking |
 
-The merchant recomputes prices, shipping (free over $30 on standard), tax (8%) and stock on every call. A session is `incomplete` until it has items, buyer, address and a shipping option, then becomes `ready_for_complete`.
+The merchant validates the plate (`1-ABC-123`), checks slot capacity (2 per branch and slot), whether a service can be done mobile, and computes totals (21% VAT included, €25 mobile fee). A session is `incomplete` until everything is valid, then `ready_for_complete`.
 
 ### Try it as an agent
 
-With the server running, a script buys a book using only the API:
+With the server running, a script books a job using only the API:
 
 ```
-node agent.js "neuromancer" 1
+node agent.js windscreen 1-ABC-123
 ```
 
-State is in memory and resets when the server restarts.
+Service ids: `chip_repair`, `windscreen`, `side_window`, `rear_window`, `adas`. State is in memory and resets on restart.
 
 ## 2. Concept walkthrough (`index.html`)
 
