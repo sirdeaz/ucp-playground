@@ -187,7 +187,7 @@ function route(method, url, body) {
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" };
 
 function serveStatic(res, pathname) {
-  const file = path.normalize(path.join(PUBLIC, pathname === "/" ? "index.html" : pathname));
+  const file = path.normalize(path.join(PUBLIC, pathname === "/" ? "store.html" : pathname));
   if (!file.startsWith(PUBLIC + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
     res.writeHead(404, { "content-type": "text/plain" }).end("Not found");
     return;
