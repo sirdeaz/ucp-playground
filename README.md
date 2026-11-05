@@ -28,6 +28,10 @@ Use `PORT=8080 node server.js` to change the port.
 
 The merchant validates the plate (`1-ABC-123`), checks slot capacity (2 per branch and slot), whether a service can be done mobile, and computes totals (21% VAT included, €25 mobile fee). A session is `incomplete` until everything is valid, then `ready_for_complete`.
 
+### Bookings page and persistence
+
+Open http://localhost:3000/bookings for a public list of all bookings (filter, auto-refresh, cancel). Confirmed bookings are saved to `data/bookings.json` (git-ignored; override with `DATA_FILE=/path/file.json`) and survive restarts. Booking sessions (unfinished carts) are in memory only. `GET /api/bookings` returns the same list as JSON.
+
 ### Try it as an agent
 
 With the server running, a script books a job using only the API:
@@ -36,7 +40,7 @@ With the server running, a script books a job using only the API:
 node agent.js windscreen 1-ABC-123
 ```
 
-Service ids: `chip_repair`, `windscreen`, `side_window`, `rear_window`, `adas`. State is in memory and resets on restart.
+Service ids: `chip_repair`, `windscreen`, `side_window`, `rear_window`, `adas`. 
 
 ## 2. Concept walkthrough (`index.html`)
 
