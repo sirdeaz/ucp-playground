@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="nl" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clearview Autoglas — Beheer je afspraak</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+  <style>
+    :root { --brand: #E60F04; --brand-dark: #9B0B03; }
+    .brand-bg { background: var(--brand); color: #fff; }
+    .brand-text { color: var(--brand); }
+    .btn-brand { background: var(--brand); border-color: var(--brand); color: #fff; }
+    .btn-brand:hover { background: var(--brand-dark); border-color: var(--brand-dark); }
+    .plate { background: #fff; border: 2px solid #111; border-radius: 6px; font: 700 1.3rem/1 ui-monospace, monospace; letter-spacing: .1em; text-align: center; }
+  </style>
+</head>
+<body class="bg-base-200 text-base-content">
+  <header class="brand-bg">
+    <div class="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-3 px-5 py-3">
+      <a href="/" class="text-2xl font-black tracking-tight">Clearview <span class="font-light">Autoglas</span></a>
+      <nav class="flex items-center gap-2"><a href="/" id="nav-book" class="btn btn-sm btn-ghost text-white"></a><span id="langs" class="flex gap-1"></span></nav>
+    </div>
+  </header>
+  <main class="mx-auto max-w-4xl px-5 py-8">
+    <h1 id="title" class="text-3xl font-black"></h1>
+    <p id="text" class="mt-1 opacity-70"></p>
+    <form id="find" class="mt-5 flex flex-wrap items-end gap-3 rounded-box bg-base-100 p-5 shadow">
+      <label class="text-sm font-medium"><span id="l-ref"></span><input name="reference" class="input input-bordered mt-1 block font-mono uppercase" placeholder="ABC123" required></label>
+      <label class="text-sm font-medium"><span id="l-plate"></span><input name="plate" class="plate mt-1 block w-44 p-2" placeholder="1-ABC-123" maxlength="12" required></label>
+      <button id="find-btn" class="btn btn-brand"></button>
+    </form>
+    <p id="error" class="mt-3 text-sm text-error"></p>
+    <p id="ok" class="mt-3 text-sm text-success"></p>
+    <section id="result" class="mt-4"></section>
+  </main>
+
+  <script src="/i18n.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let booking = null, days = [], picked = null;
+
+    function chrome() {
+      document.documentElement.lang = LANG;
+      $("nav-book").textContent = t("bookNow"); $("langs").innerHTML = langSwitcher();
+      $("title").textContent = t("manageTitle"); $("text").textContent = t("manageText");
+      $("l-ref").textContent = t("ref"); $("l-plate").textContent = t("plate"); $("find-btn").textContent = t("find");
+    }
+
+    function renderBooking() {
+      const b = booking;
+      if (!b) { $("result").innerHTML = ""; return; }
+      const svc = T().svc[b.service.id]?.[0] || b.service.title;
+      const confirmed = b.status === "confirmed";
+      $("result").innerHTML = `<div class="rounded-box bg-base-100 p-5 shadow">
+        <div class="flex flex-wrap items-center justify-between gap-2"><div><span class="font-mono text-lg font-bold brand-text">${esc(b.reference)}</span> · <span class="font-mono">${esc(b.vehicle.plate)}</span></div>
+          <span class="badge ${confirmed ? "badge-success" : "badge-error"}">${esc(b.status)}</span></div>
+        <dl class="mt-3 grid gap-1 text-sm sm:grid-cols-2">
+          <div><dt class="inline opacity-60">${esc(t("service"))}: </dt><dd class="inline font-medium">${esc(svc)}</dd></div>
+          <div><dt class="inline opacity-60">${esc(t("where"))}: </dt><dd class="inline font-medium">${esc(b.location.id === "home" ? t("homeTitle") : b.location.title)}</dd></div>
+          <div><dt class="inline opacity-60">${esc(t("when"))}: </dt><dd class="inline font-medium">${esc(dateLabel(b.slot.date))} ${esc(b.slot.time)}</dd></div>
+          <div><dt class="inline opacity-60">${esc(b.insurance.claim ? t("insurerBilled") : t("balance"))}: </dt><dd class="inline font-medium">${esc(b.insurance.claim ? b.insurance.company : money(b.balance_due.amount))}</dd></div></dl>
+        ${confirmed ? `<div class="mt-5 flex flex-wrap gap-2"><button id="resched" class="btn btn-sm btn-outline">${esc(t("reschedule"))}</button><button id="cancel" class="btn btn-sm btn-outline btn-error">${esc(t("cancelBooking"))}</button></div>` : ""}
+        <div id="slots" class="mt-4 space-y-2"></div></div>`;
+    }
+
+    function renderSlots() {
+      $("slots").innerHTML = days.map((d) => `<div class="flex flex-wrap items-center gap-2"><span class="w-28 text-sm font-medium">${esc(dateLabel(d.date))}</span>${d.times.map((x) =>
+        `<button class="btn btn-xs ${picked?.date === d.date && picked?.time === x.time ? "btn-brand" : "btn-outline"}" data-date="${d.date}" data-time="${x.time}" ${x.available ? "" : "disabled"}>${x.time}</button>`).join("")}</div>`).join("") +
+        (days.length ? `<button id="save" class="btn btn-sm btn-brand mt-2" ${picked ? "" : "disabled"}>${esc(t("save"))}</button>` : "");
+    }
+
+    $("find").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("error").textContent = $("ok").textContent = "";
+      const d = Object.fromEntries(new FormData(e.target));
+      const res = await fetch(`/api/bookings/lookup?reference=${encodeURIComponent(d.reference)}&plate=${encodeURIComponent(d.plate)}`);
+      if (!res.ok) { booking = null; renderBooking(); $("error").textContent = t("notFound"); return; }
+      booking = await res.json(); days = []; picked = null; renderBooking();
+    });
+
+    document.addEventListener("click", async (e) => {
+      const el = e.target.closest("button");
+      if (!el) return;
+      if (el.dataset.lang) { setLang(el.dataset.lang); chrome(); renderBooking(); return; }
+      if (el.id === "resched") {
+        days = (await (await fetch(`/api/availability?location=${booking.location.id}`)).json()).days; picked = null; renderSlots();
+      } else if (el.dataset.date) { picked = { date: el.dataset.date, time: el.dataset.time }; renderSlots(); }
+      else if (el.id === "save") {
+        const res = await fetch(`/api/bookings/${booking.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ slot: picked }) });
+        const data = await res.json();
+        if (!res.ok) { $("error").textContent = data.error.message; return; }
+        booking = data; days = []; renderBooking(); $("ok").textContent = t("saved");
+      } else if (el.id === "cancel" && confirm(t("confirmCancel"))) {
+        const res = await fetch(`/api/bookings/${booking.id}`, { method: "DELETE" });
+        booking = await res.json(); days = []; renderBooking(); $("ok").textContent = t("canceled");
+      }
+    });
+    chrome();
+  </script>
+</body>
+</html>

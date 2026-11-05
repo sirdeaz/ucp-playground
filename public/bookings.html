@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
   <style>
-    :root { --brand: #d71920; }
+    :root { --brand: #E60F04; }
     .brand-bg { background: var(--brand); color: #fff; }
     .brand-text { color: var(--brand); }
   </style>
@@ -17,7 +17,7 @@
   <header class="brand-bg">
     <div class="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
       <div class="text-2xl font-black tracking-tight">Clearview <span class="font-light">Autoglas</span> <span class="ml-2 text-sm font-normal opacity-80">/ Bookings</span></div>
-      <a href="/" class="btn btn-sm btn-outline border-white/60 text-white">← Book a job</a>
+      <span class="flex gap-2"><a href="/manage" class="btn btn-sm btn-outline border-white/60 text-white">Beheer afspraak</a><a href="/" class="btn btn-sm btn-outline border-white/60 text-white">← Book a job</a></span>
     </div>
   </header>
 
@@ -55,7 +55,7 @@
         <td>${esc(b.location.title)}</td>
         <td class="font-mono">${esc(b.vehicle.plate)}</td>
         <td>${esc(b.contact.name)}<br><span class="text-xs opacity-60">${esc(b.contact.email)} · ${esc(b.contact.phone)}</span></td>
-        <td class="whitespace-nowrap">${money(b.total.amount)}<br><span class="text-xs opacity-60">deposit ${money(b.deposit_paid.amount)}</span></td>
+        <td class="whitespace-nowrap">${b.insurance?.claim ? `${money(b.billed_to_insurer?.amount ?? 0)}<br><span class="text-xs opacity-60">billed to insurer</span>` : `${money(b.total.amount)}<br><span class="text-xs opacity-60">deposit ${money(b.deposit_paid.amount)}</span>`}</td>
         <td><span class="badge ${b.status === "confirmed" ? "badge-success" : "badge-error"}">${esc(b.status)}</span></td>
         <td>${b.status === "confirmed" ? `<button class="btn btn-xs btn-outline" data-cancel="${esc(b.id)}">Cancel</button>` : ""}</td></tr>`).join("") ||
         `<tr><td colspan="9" class="py-8 text-center opacity-60">No bookings yet.</td></tr>`;

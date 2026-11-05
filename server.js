@@ -11,22 +11,29 @@ const CURRENCY = "EUR";
 const VAT = 0.21;
 const DEPOSIT_RATE = 0.2;
 
+// Prices are what a customer without glass insurance pays (VAT incl.). Insured customers pay nothing
+// ("usually free" in practice): the insurer is billed instead. Replacement prices are demo estimates;
+// a real shop quotes them per car and glass type.
 const SERVICES = [
-  { id: "chip_repair", title: "Chip / crack repair", description: "Resin repair of stone chips up to 2 cm. Usually 30 min.", price: 5900, duration_min: 30, mobile: true },
-  { id: "windscreen", title: "Windscreen replacement", description: "New windscreen incl. fitting, sealing and recalibration check.", price: 32000, duration_min: 90, mobile: true },
-  { id: "side_window", title: "Side window replacement", description: "Front or rear door window.", price: 17500, duration_min: 75, mobile: true },
-  { id: "rear_window", title: "Rear window replacement", description: "Rear window incl. heating element connection.", price: 24500, duration_min: 90, mobile: false },
-  { id: "adas", title: "ADAS camera recalibration", description: "Required after many windscreen replacements.", price: 9500, duration_min: 45, mobile: false },
+  { id: "chip_repair", title: "Repair a stone chip", description: "Chip smaller than a €2 coin and more than 6 cm from the edge. Lifetime guarantee.", price: 16417, duration_min: 45, mobile: true, walk_in: true, estimate: false },
+  { id: "windscreen", title: "Replace windscreen", description: "Original-quality glass, fitted and sealed.", price: 42000, duration_min: 120, mobile: true, estimate: true },
+  { id: "side_window", title: "Replace side window", description: "A broken side window must always be replaced.", price: 21000, duration_min: 90, mobile: true, estimate: true },
+  { id: "rear_window", title: "Replace rear window", description: "Including heating element connection.", price: 29000, duration_min: 120, mobile: false, estimate: true },
+  { id: "panoramic_roof", title: "Replace panoramic roof", description: "Glass roof replacement.", price: 78000, duration_min: 180, mobile: false, estimate: true },
+  { id: "adas", title: "Recalibrate cameras & sensors", description: "Driver-assistance recalibration after glass work.", price: 12000, duration_min: 60, mobile: false, estimate: false },
 ];
 
 const LOCATIONS = [
-  { id: "bxl", title: "Brussels – Anderlecht", address: "Rue des Goujons 12, 1070 Anderlecht" },
-  { id: "ant", title: "Antwerp – Berchem", address: "Singel 210, 2600 Berchem" },
-  { id: "gnt", title: "Ghent – Sint-Denijs-Westrem", address: "Pantserschipstraat 88, 9000 Gent" },
-  { id: "lgg", title: "Liège – Herstal", address: "Rue Hoche 5, 4040 Herstal" },
-  { id: "home", title: "Mobile – we come to you", address: "At your home or work (+€25)", mobile: true },
+  { id: "ant", province: "Antwerpen", title: "Antwerpen", address: "Singel 210, 2600 Berchem" },
+  { id: "mec", province: "Antwerpen", title: "Mechelen", address: "Nekkerspoelstraat 120, 2800 Mechelen" },
+  { id: "bxl", province: "Brussel", title: "Elsene", address: "Waterloosesteenweg 300, 1050 Elsene" },
+  { id: "gan", province: "Brussel", title: "Ganshoren", address: "Leopold I-laan 400, 1083 Ganshoren" },
+  { id: "gnt", province: "Oost-Vlaanderen", title: "Gent", address: "Pantserschipstraat 88, 9000 Gent" },
+  { id: "has", province: "Limburg", title: "Hasselt", address: "Kempische Steenweg 210, 3500 Hasselt" },
+  { id: "chr", province: "Henegouwen", title: "Charleroi", address: "Boulevard Joseph Tirou 90, 6000 Charleroi" },
+  { id: "lgg", province: "Luik", title: "Luik – Herstal", address: "Rue Hoche 5, 4040 Herstal" },
+  { id: "home", province: "Aan huis", title: "At home or work", address: "We come to you", mobile: true },
 ];
-const MOBILE_FEE = 2500;
 const TIMES = ["08:00", "10:00", "13:00", "15:00"];
 const SLOT_CAPACITY = 2;
 
@@ -97,9 +104,12 @@ function evaluate(s) {
   if (!s.contact?.name || !s.contact?.email || !s.contact?.phone) messages.push({ type: "info", code: "missing_contact", content: "Name, email and phone required" });
   else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.contact.email)) messages.push({ type: "error", code: "invalid_email", content: "Invalid email address" });
 
+  const insured = !!s.insurance?.claim;
+  if (!s.insurance) messages.push({ type: "info", code: "missing_insurance", content: "Tell us whether this is an insurance claim" });
+  else if (insured && !s.insurance.company) messages.push({ type: "info", code: "missing_insurer", content: "Insurance company required" });
+
   const base = svc ? svc.price : 0;
-  const mobile = loc?.mobile ? MOBILE_FEE : 0;
-  const total = base + mobile;
+  const total = insured ? 0 : base; // insurer is billed directly
   const vat = Math.round(total - total / (1 + VAT)); // prices are VAT-inclusive
   const deposit = Math.round(total * DEPOSIT_RATE);
   return {
@@ -107,7 +117,7 @@ function evaluate(s) {
     status: messages.length ? "incomplete" : "ready_for_complete",
     totals: [
       { type: "service", amount: base },
-      { type: "mobile_fee", amount: mobile },
+      { type: "billed_to_insurer", amount: insured ? base : 0 },
       { type: "total", amount: total },
       { type: "vat_included", amount: vat },
       { type: "deposit_due_now", amount: deposit },
@@ -154,6 +164,7 @@ function applyUpdate(s, b) {
   if (b.slot !== undefined) s.slot = b.slot && { date: String(b.slot.date), time: String(b.slot.time) };
   if (b.contact) s.contact = { ...s.contact, ...b.contact };
   if (b.insurance) s.insurance = { claim: !!b.insurance.claim, company: String(b.insurance.company || "").slice(0, 60) };
+  if (b.language) s.language = ["nl", "fr", "en"].includes(b.language) ? b.language : "nl";
 }
 
 function getSession(id) {
@@ -176,7 +187,7 @@ function route(method, url, body) {
       payment: { handlers: [{ id: "mock_pay", name: "Mock Pay (demo, no real money)" }] },
     }];
   }
-  if (method === "GET" && p === "/api/services") return [200, { services: SERVICES.map(({ id, title, description, price, duration_min, mobile }) => ({ id, title, description, duration_min, mobile_possible: mobile, price: { amount: price, currency: CURRENCY } })) }];
+  if (method === "GET" && p === "/api/services") return [200, { services: SERVICES.map(({ id, title, description, price, duration_min, mobile, walk_in, estimate }) => ({ id, title, description, duration_min, mobile_possible: mobile, walk_in: !!walk_in, price_is_estimate: estimate, price: { amount: price, currency: CURRENCY } })) }];
   if (method === "GET" && p === "/api/locations") return [200, { locations: LOCATIONS }];
   if (method === "GET" && p === "/api/availability") {
     return [200, { location_id: url.searchParams.get("location"), days: availability(url.searchParams.get("location")) }];
@@ -201,16 +212,19 @@ function route(method, url, body) {
     const view = render(s);
     if (view.status !== "ready_for_complete") throw new HttpError(422, "not_ready", "Session is not ready: " + view.messages.map((x) => x.content).join("; "));
     const { handler_id: handler, token } = body.payment || {};
-    if (handler !== "mock_pay") throw new HttpError(400, "unknown_payment_handler", "Use handler_id 'mock_pay'");
-    if (!token) throw new HttpError(400, "missing_payment_token", "payment.token required (try tok_success)");
-    if (token === "tok_declined") throw new HttpError(402, "payment_declined", "Deposit payment declined");
-    const loc = LOCATIONS.find((x) => x.id === s.location_id);
     const get = (t) => view.totals.find((x) => x.type === t).amount;
+    if (get("deposit_due_now") > 0) {
+      if (handler !== "mock_pay") throw new HttpError(400, "unknown_payment_handler", "Use handler_id 'mock_pay'");
+      if (!token) throw new HttpError(400, "missing_payment_token", "payment.token required (try tok_success)");
+      if (token === "tok_declined") throw new HttpError(402, "payment_declined", "Deposit payment declined");
+    }
+    const loc = LOCATIONS.find((x) => x.id === s.location_id);
     const booking = {
       id: newId("bk"), status: "confirmed", reference: crypto.randomBytes(3).toString("hex").toUpperCase(),
-      service: view.service, location: { id: loc.id, title: loc.title, address: loc.address }, vehicle: s.vehicle, slot: s.slot, contact: s.contact, insurance: s.insurance || null,
-      total: { amount: get("total"), currency: CURRENCY }, deposit_paid: { amount: get("deposit_due_now"), currency: CURRENCY }, balance_due: { amount: get("balance_at_appointment"), currency: CURRENCY },
-      created_at: new Date().toISOString(),
+      service: view.service, location: { id: loc.id, title: loc.title, address: loc.address }, vehicle: s.vehicle, slot: s.slot, contact: s.contact, insurance: s.insurance,
+      total: { amount: get("total"), currency: CURRENCY }, billed_to_insurer: { amount: get("billed_to_insurer"), currency: CURRENCY },
+      deposit_paid: { amount: get("deposit_due_now"), currency: CURRENCY }, balance_due: { amount: get("balance_at_appointment"), currency: CURRENCY },
+      language: s.language || "nl", created_at: new Date().toISOString(),
     };
     bookings.set(booking.id, booking);
     saveBookings();
@@ -222,7 +236,26 @@ function route(method, url, body) {
     const list = [...bookings.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
     return [200, { bookings: list }];
   }
+  if (method === "GET" && p === "/api/bookings/lookup") {
+    const ref = (url.searchParams.get("reference") || "").trim().toUpperCase();
+    const plate = normalizePlate(url.searchParams.get("plate"));
+    const b = [...bookings.values()].find((x) => x.reference === ref && x.vehicle.plate === plate);
+    if (!b) throw new HttpError(404, "not_found", "No booking matches that reference and plate");
+    return [200, b];
+  }
   m = p.match(/^\/api\/bookings\/([\w-]+)$/);
+  if (m && method === "PUT") {
+    const b = bookings.get(m[1]);
+    if (!b) throw new HttpError(404, "not_found", "Booking not found");
+    if (b.status !== "confirmed") throw new HttpError(409, "not_confirmed", `Booking is ${b.status}`);
+    const slot = body.slot && { date: String(body.slot.date), time: String(body.slot.time) };
+    if (!slot || !bookableDates().includes(slot.date) || !TIMES.includes(slot.time)) throw new HttpError(400, "invalid_slot", "Slot is not bookable");
+    const same = b.slot.date === slot.date && b.slot.time === slot.time;
+    if (!same && taken(b.location.id, slot.date, slot.time) >= SLOT_CAPACITY) throw new HttpError(409, "slot_taken", "That slot is taken");
+    b.slot = slot;
+    saveBookings();
+    return [200, b];
+  }
   if (m && method === "GET") {
     const b = bookings.get(m[1]);
     if (!b) throw new HttpError(404, "not_found", "Booking not found");
@@ -240,7 +273,7 @@ function route(method, url, body) {
 
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" };
 
-const PAGES = { "/": "booking.html", "/bookings": "bookings.html" };
+const PAGES = { "/": "booking.html", "/bookings": "bookings.html", "/manage": "manage.html" };
 
 function serveStatic(res, pathname) {
   const file = path.normalize(path.join(PUBLIC, PAGES[pathname] || pathname));
