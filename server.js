@@ -31,7 +31,20 @@ const TIMES = ["08:00", "10:00", "13:00", "15:00"];
 const SLOT_CAPACITY = 2;
 
 const sessions = new Map();
+const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, "data", "bookings.json");
 const bookings = new Map();
+try {
+  for (const b of JSON.parse(fs.readFileSync(DATA_FILE, "utf8"))) bookings.set(b.id, b);
+} catch (e) {
+  if (e.code !== "ENOENT") console.error("Could not load bookings:", e.message);
+}
+// Write to a temp file then rename so a crash never leaves a half-written file.
+function saveBookings() {
+  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+  const tmp = DATA_FILE + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify([...bookings.values()], null, 2));
+  fs.renameSync(tmp, DATA_FILE);
+}
 const newId = (p) => `${p}_${crypto.randomBytes(5).toString("hex")}`;
 
 class HttpError extends Error {
@@ -200,9 +213,14 @@ function route(method, url, body) {
       created_at: new Date().toISOString(),
     };
     bookings.set(booking.id, booking);
+    saveBookings();
     s.status = "completed";
     s.booking_id = booking.id;
     return [200, { ...render(s), booking }];
+  }
+  if (method === "GET" && p === "/api/bookings") {
+    const list = [...bookings.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return [200, { bookings: list }];
   }
   m = p.match(/^\/api\/bookings\/([\w-]+)$/);
   if (m && method === "GET") {
@@ -214,6 +232,7 @@ function route(method, url, body) {
     const b = bookings.get(m[1]);
     if (!b) throw new HttpError(404, "not_found", "Booking not found");
     b.status = "canceled";
+    saveBookings();
     return [200, b];
   }
   return null;
@@ -221,8 +240,10 @@ function route(method, url, body) {
 
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" };
 
+const PAGES = { "/": "booking.html", "/bookings": "bookings.html" };
+
 function serveStatic(res, pathname) {
-  const file = path.normalize(path.join(PUBLIC, pathname === "/" ? "booking.html" : pathname));
+  const file = path.normalize(path.join(PUBLIC, PAGES[pathname] || pathname));
   if (!file.startsWith(PUBLIC + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
     res.writeHead(404, { "content-type": "text/plain" }).end("Not found");
     return;

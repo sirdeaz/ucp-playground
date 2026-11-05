@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clearview Autoglas — Bookings</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+  <style>
+    :root { --brand: #d71920; }
+    .brand-bg { background: var(--brand); color: #fff; }
+    .brand-text { color: var(--brand); }
+  </style>
+</head>
+<body class="bg-base-200 text-base-content">
+  <header class="brand-bg">
+    <div class="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
+      <div class="text-2xl font-black tracking-tight">Clearview <span class="font-light">Autoglas</span> <span class="ml-2 text-sm font-normal opacity-80">/ Bookings</span></div>
+      <a href="/" class="btn btn-sm btn-outline border-white/60 text-white">← Book a job</a>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-6xl px-5 py-8">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div><h1 class="text-2xl font-black">All bookings</h1><p id="count" class="text-sm opacity-60"></p></div>
+      <div class="flex gap-2">
+        <input id="filter" type="search" class="input input-bordered input-sm" placeholder="Filter by plate, name, reference…">
+        <button id="refresh" class="btn btn-sm">Refresh</button>
+      </div>
+    </div>
+    <p class="mt-2 text-xs opacity-60">Public demo page: everything here is fictional test data. Auto-refreshes every 10 seconds.</p>
+    <div class="mt-4 overflow-x-auto rounded-box bg-base-100 shadow">
+      <table class="table">
+        <thead><tr><th>Ref</th><th>When</th><th>Service</th><th>Location</th><th>Plate</th><th>Customer</th><th>Total</th><th>Status</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const money = (c) => `€${(c / 100).toFixed(2).replace(".", ",")}`;
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    let all = [];
+
+    function render() {
+      const q = $("filter").value.trim().toLowerCase();
+      const list = all.filter((b) => !q || [b.reference, b.vehicle.plate, b.contact.name, b.contact.email, b.service.title, b.location.title].some((f) => String(f).toLowerCase().includes(q)));
+      $("count").textContent = `${list.length} of ${all.length} booking${all.length === 1 ? "" : "s"}`;
+      $("rows").innerHTML = list.map((b) => `<tr>
+        <td class="font-mono font-bold brand-text">${esc(b.reference)}</td>
+        <td class="whitespace-nowrap">${esc(b.slot.date)}<br><span class="text-xs opacity-60">${esc(b.slot.time)}</span></td>
+        <td>${esc(b.service.title)}${b.insurance?.claim ? `<br><span class="badge badge-ghost badge-sm">insurance${b.insurance.company ? ": " + esc(b.insurance.company) : ""}</span>` : ""}</td>
+        <td>${esc(b.location.title)}</td>
+        <td class="font-mono">${esc(b.vehicle.plate)}</td>
+        <td>${esc(b.contact.name)}<br><span class="text-xs opacity-60">${esc(b.contact.email)} · ${esc(b.contact.phone)}</span></td>
+        <td class="whitespace-nowrap">${money(b.total.amount)}<br><span class="text-xs opacity-60">deposit ${money(b.deposit_paid.amount)}</span></td>
+        <td><span class="badge ${b.status === "confirmed" ? "badge-success" : "badge-error"}">${esc(b.status)}</span></td>
+        <td>${b.status === "confirmed" ? `<button class="btn btn-xs btn-outline" data-cancel="${esc(b.id)}">Cancel</button>` : ""}</td></tr>`).join("") ||
+        `<tr><td colspan="9" class="py-8 text-center opacity-60">No bookings yet.</td></tr>`;
+    }
+
+    async function load() {
+      const res = await fetch("/api/bookings");
+      all = (await res.json()).bookings;
+      render();
+    }
+
+    document.addEventListener("click", async (e) => {
+      const id = e.target.dataset.cancel;
+      if (!id || !confirm("Cancel this booking?")) return;
+      await fetch(`/api/bookings/${id}`, { method: "DELETE" });
+      load();
+    });
+    $("filter").addEventListener("input", render);
+    $("refresh").addEventListener("click", load);
+    load();
+    setInterval(load, 10000);
+  </script>
+</body>
+</html>
